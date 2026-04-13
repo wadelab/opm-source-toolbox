@@ -1,0 +1,42 @@
+[project]
+name = "opm-source-roi"
+version = "0.1.0"
+description = "Manifest-driven OPM/MEG source ROI export and surface rendering"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.21",
+    "pandas>=1.5",
+    "scipy>=1.8",
+    "mne>=1.0",
+    "nibabel>=5.3",
+]
+
+[project.optional-dependencies]
+surface = [
+    "matplotlib>=3.5",
+    "nilearn>=0.12.1",
+]
+alignment-qc = [
+    "pillow>=10.0",
+    "pyvista>=0.46.5",
+]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+opm-source-fetch-atlas = "opm_source_toolbox.cli.fetch_atlas:main"
+opm-source-manifest-export = "opm_source_toolbox.cli.export_sensor_data_to_source_rois:main"
+opm-source-alignment-qc = "opm_source_toolbox.cli.render_alignment_qc:main"
+opm-source-surface-vector = "opm_source_toolbox.cli.render_roi_vector_on_surface:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/opm_source_toolbox"]
+artifacts = [
+    "src/opm_source_toolbox/schaefer/*.annot",
+]

@@ -1,0 +1,14 @@
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.so
+.DS_Store
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.venv/
+alignment_qc/
+roi_surface_renders/
+source_roi_exports/
