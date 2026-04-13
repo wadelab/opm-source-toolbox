@@ -1,8 +1,7 @@
 # OPM Source ROI
 
-This directory is a self-contained staging copy of the extracted generic OPM/MEG ROI
-toolbox. It is intended to be the near-final handoff state before moving the package
-into a dedicated repository.
+Standalone generic OPM/MEG source-imaging tools for ROI export, alignment QC, and
+surface rendering.
 
 The toolbox currently exposes four reusable entrypoints:
 
@@ -18,14 +17,9 @@ Those cover:
 - sensor/head alignment QC rendering
 - ROI value rendering onto cortical surfaces
 
-## Layout
-
-- `src/opm_source_toolbox/`
-	The extracted package source
-- `docs/`
-	User-facing workflow documentation
-- `tests/`
-	Package-level tests for the generic workflows
+Surface rendering and alignment QC remain part of this same toolbox package and CLI
+surface. Optional extras only control whether the visualization dependencies are
+installed; they do not indicate separate packages.
 
 ## Install
 
@@ -35,16 +29,10 @@ From this directory:
 uv pip install -e .
 ```
 
-With optional visualization dependencies:
+For local development and tests:
 
 ```bash
-uv pip install -e ".[surface,alignment-qc,dev]"
-```
-
-To export this staging tree into a clean standalone repository directory:
-
-```bash
-./scripts/export_repo_candidate.sh /absolute/path/to/opm-source-roi
+uv pip install -e ".[dev]"
 ```
 
 From another project after this is split into its own repository:
@@ -83,6 +71,4 @@ The intended first-release Python API is documented in `docs/public_api.md`.
 3. Optionally inspect geometry with `opm-source-alignment-qc`.
 4. Optionally render ROI values with `opm-source-surface-vector`.
 
-The detailed extraction and packaging notes remain in `../docs/standalone_roi_package.md`.
-
-The concrete first-repo-cut checklist lives in `docs/repo_cut_checklist.md`.
+Additional command and API details live in the `docs/` directory.

@@ -23,6 +23,10 @@ alignment-qc = [
 ]
 dev = [
     "pytest>=7.0",
+    "matplotlib>=3.5",
+    "nilearn>=0.12.1",
+    "pillow>=10.0",
+    "pyvista>=0.46.5",
 ]
 
 [project.scripts]
