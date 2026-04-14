@@ -1,7 +1,6 @@
 # Public API
 
-This file defines the intended first-release public Python API for the standalone
-toolbox.
+This file defines the public Python API for the standalone toolbox.
 
 Critical downstream code should target these top-level imports:
 
@@ -32,13 +31,13 @@ as stable downstream dependencies:
 
 - underscore-prefixed helpers such as `_load_sensor_item`
 - implementation details inside `core.py`
-- staging-only layout or documentation files
-- compatibility shims in the vibroMEG repository
+- documentation layout or generated documentation artifacts
+- compatibility shims in downstream repositories such as vibroMEG
 
 ## Stability Rule
 
-For the first standalone extraction, prefer changing implementation behind these names
-without changing the names themselves.
+Prefer changing implementation behind these names without changing the names
+themselves.
 
 If a change requires renaming or removing one of the symbols above, treat it as a
 release-note event for downstream code.

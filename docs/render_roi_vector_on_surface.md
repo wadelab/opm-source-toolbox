@@ -1,4 +1,4 @@
-# `render_roi_vector_on_surface.py`
+# `opm-source-surface-vector`
 
 This is the generic surface-render helper for the source toolbox.
 
@@ -43,7 +43,7 @@ uv run opm-source-surface-vector --in-csv path/to/roi_values.csv --value-col val
 or:
 
 ```bash
-./.venv/bin/python render_roi_vector_on_surface.py --in-csv path/to/roi_values.csv --value-col value
+./.venv/bin/python -m opm_source_toolbox.cli.render_roi_vector_on_surface --in-csv path/to/roi_values.csv --value-col value
 ```
 
 If you do not pass `--out-dir`, renders now default to `./roi_surface_renders`
@@ -91,7 +91,7 @@ With the default CLI settings, those files are written under:
 
 The generic renderer is also available from the toolbox package:
 
-- [roi_surface_render.py](/raid/toolbox/git/vibroMEG/opm_source_toolbox/roi_surface_render.py)
+- [roi_surface_render.py](../src/opm_source_toolbox/roi_surface_render.py)
 
 Main entrypoints:
 

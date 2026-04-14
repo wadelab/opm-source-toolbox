@@ -3,6 +3,7 @@ name = "opm-source-roi"
 version = "0.1.0"
 description = "Manifest-driven OPM/MEG source ROI export and surface rendering"
 readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.9"
 keywords = ["meg", "opm", "mne", "source-imaging", "roi"]
 classifiers = [

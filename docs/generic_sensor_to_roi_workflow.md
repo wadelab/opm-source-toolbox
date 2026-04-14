@@ -14,15 +14,60 @@ for example:
 - a task-condition average produced by some other pipeline
 - a `Raw` / `Epochs` / `Evoked` FIF that should be converted on the fly
 
+## Quickstart: One Subject, One FIF
+
+For the happiest-path local case, assume:
+
+- one subject directory such as `/data/co-reg/R9999/` containing `/data/co-reg/R9999/FS/`
+- one input FIF such as `/data/opm/R9999/run01_raw.fif`
+- one matching transform in that same directory such as `/data/opm/R9999/run01_trans.fif`
+
+First, make sure the default Schaefer atlas is available:
+
+```bash
+uv run opm-source-fetch-atlas --atlas-name schaefer
+```
+
+Then run the export directly from the FIF directory:
+
+```bash
+uv run opm-source-manifest-export \
+  --subject-dir /data/co-reg/R9999 \
+  --fif-dir /data/opm/R9999 \
+  --out-dir /data/source_roi_exports
+```
+
+This convenience mode skips the manifest. The exporter scans `--fif-dir`, ignores
+`*_trans.fif` files, and because there is exactly one transform file in that directory
+it reuses that transform automatically for the input FIF.
+
+Outputs are written under `/data/source_roi_exports/R9999/`. By default the ROI matrix
+is written as `.csv`; add `--output-format npz` for compressed binary output.
+
 ## CLI
 
 Use:
 
 `uv run opm-source-manifest-export --manifest path/to/manifest.json`
 
+Add `--output-format npz` to write compressed binary ROI matrices instead of CSV.
+
 or:
 
-`./.venv/bin/python export_sensor_data_to_source_rois.py --manifest path/to/manifest.json`
+`./.venv/bin/python -m opm_source_toolbox.cli.export_sensor_data_to_source_rois --manifest path/to/manifest.json`
+
+Convenience FIF mode for one subject:
+
+`uv run opm-source-manifest-export --subject-dir /path/to/co-reg/R9999 --fif-dir /path/to/fifs`
+
+or:
+
+`./.venv/bin/python -m opm_source_toolbox.cli.export_sensor_data_to_source_rois --subject-dir /path/to/co-reg/R9999 --fif-dir /path/to/fifs`
+
+In convenience mode the CLI scans `--fif-dir` for FIF inputs, ignores `*_trans.fif`
+files, and auto-resolves one `trans` per FIF. If a FIF directory contains exactly one
+`*_trans.fif`, that file is reused for all FIF inputs in that directory. If not, the
+CLI falls back to searching `--subject-dir` with the same naming rules.
 
 ## Input Contract
 
@@ -47,6 +92,11 @@ Each item declares:
     Path to a CSV sensor matrix with columns `ch_name, t000, t001, ...`
   - `fif_path`
     Path to a `Raw`, `Epochs`, or `Evoked` FIF file
+- `sfreq_hz` (required with `matrix_path`)
+  Sampling rate for that matrix input. FIF-backed inputs carry this in the file header.
+- `time_start_s` (required with `matrix_path`)
+  Time in seconds for the first sample in that matrix. FIF-backed inputs carry this in
+  the object time axis.
 - `source_file` (optional for direct FIF input)
   FIF used to recover channel geometry / header info
 - `geometry_info_file` (optional)
@@ -67,12 +117,16 @@ Each item declares:
         {
           "name": "rest_run01",
           "matrix_path": "/path/to/rest_run01.csv",
+          "sfreq_hz": 200.0,
+          "time_start_s": 0.0,
           "source_file": "/path/to/preprocessed_R9999_Run01.fif",
           "trans_path": "/path/to/R9999_Run01_trans.fif"
         },
         {
           "name": "task_average_left",
           "matrix_path": "/path/to/task_average_left.csv",
+          "sfreq_hz": 200.0,
+          "time_start_s": -0.1,
           "source_file": "/path/to/preprocessed_R9999_Run02.fif",
           "trans_path": "/path/to/R9999_Run02_trans.fif",
           "metadata": {
@@ -116,11 +170,8 @@ Direct FIF example:
 }
 ```
 
-Checked-in example manifest:
-
-- [generic_source_from_fif_manifest.json](/raid/toolbox/git/vibroMEG/docs/examples/generic_source_from_fif_manifest.json)
-
-- [generic_source_from_fif_manifest.json](/raid/toolbox/git/vibroMEG/docs/examples/generic_source_from_fif_manifest.json)
+There is no checked-in manifest example in this repo beyond the snippets above. For the
+simplest local workflow, prefer convenience FIF mode and skip the manifest entirely.
 
 ## Covariance Flag
 
@@ -155,10 +206,16 @@ Outputs are written to:
 
 Files:
 
-- one ROI CSV per input item
+- one ROI matrix file per input item (`.csv` by default, or `.npz` with `--output-format npz`)
 - `metadata.json` describing atlas, inverse settings, covariance choices, and provenance
 
-Each ROI CSV uses:
+CSV outputs use:
 
 - `roi_name`
 - `t000, t001, ...`
+
+NPZ outputs store:
+
+- `name_col`
+- `names`
+- `data`

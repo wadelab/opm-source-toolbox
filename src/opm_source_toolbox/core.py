@@ -71,6 +71,34 @@ def write_matrix_csv(path: str, name_col: str, names: Sequence[str], data: np.nd
     df.to_csv(path, index=False)
 
 
+def load_matrix_npz(path: str, name_col: str) -> Tuple[List[str], np.ndarray]:
+    with np.load(path, allow_pickle=False) as payload:
+        stored_name_col = str(payload["name_col"].item())
+        if stored_name_col != name_col:
+            raise KeyError(
+                f"NPZ matrix {path} stores '{stored_name_col}' instead of '{name_col}'"
+            )
+        names = payload["names"].astype(str).tolist()
+        data = np.asarray(payload["data"], dtype=float)
+    if data.ndim != 2:
+        raise ValueError(f"Expected a 2D matrix in {path}, got shape {data.shape}")
+    if len(names) != data.shape[0]:
+        raise ValueError(
+            f"Matrix/name mismatch in {path}: {len(names)} names for {data.shape[0]} rows"
+        )
+    return names, data
+
+
+def write_matrix_npz(path: str, name_col: str, names: Sequence[str], data: np.ndarray) -> None:
+    data = np.asarray(data, dtype=float)
+    np.savez_compressed(
+        path,
+        name_col=np.asarray(name_col),
+        names=np.asarray(list(names), dtype=str),
+        data=data,
+    )
+
+
 def resolve_subject_anatomy(
     coreg_dir: str,
     subject: str,

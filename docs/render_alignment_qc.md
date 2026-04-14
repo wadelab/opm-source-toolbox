@@ -1,4 +1,4 @@
-# `render_alignment_qc.py`
+# `opm-source-alignment-qc`
 
 This is the generic alignment-QC helper for the source toolbox.
 
@@ -28,7 +28,7 @@ uv run opm-source-alignment-qc \
 or:
 
 ```bash
-./.venv/bin/python render_alignment_qc.py \
+./.venv/bin/python -m opm_source_toolbox.cli.render_alignment_qc \
   --subject-dir /path/to/co-reg/R9999 \
   --geometry-info-file /path/to/preprocessed_R9999_Run01_raw.fif \
   --trans-path /path/to/R9999_Run01_trans.fif
@@ -78,7 +78,7 @@ With the default CLI settings, those files are written under:
 
 The generic renderer is also available from the toolbox package:
 
-- [alignment_qc.py](/raid/toolbox/git/vibroMEG/opm_source_toolbox/alignment_qc.py)
+- [alignment_qc.py](../src/opm_source_toolbox/alignment_qc.py)
 
 Main entrypoints:
 

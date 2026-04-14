@@ -1,4 +1,4 @@
-# `fetch_atlas.py`
+# `opm-source-fetch-atlas`
 
 This helper imports atlas annotation files into a reusable subjects directory so the
 toolbox can resolve them later without bundling every atlas inside the package.
@@ -16,6 +16,12 @@ Use the packaged Schaefer annotations and copy them into the default toolbox cac
 
 ```bash
 uv run opm-source-fetch-atlas --atlas-name schaefer
+```
+
+or:
+
+```bash
+./.venv/bin/python -m opm_source_toolbox.cli.fetch_atlas --atlas-name schaefer
 ```
 
 Import Schaefer annotations from a local directory into a specific subjects dir:
@@ -65,7 +71,7 @@ Atlas resolution now searches that cache automatically, as well as:
 
 The helper is also available from the package:
 
-- [atlas_fetch.py](/raid/toolbox/git/vibroMEG/opm_source_toolbox/atlas_fetch.py)
+- [atlas_fetch.py](../src/opm_source_toolbox/atlas_fetch.py)
 
 Main entrypoints:
 

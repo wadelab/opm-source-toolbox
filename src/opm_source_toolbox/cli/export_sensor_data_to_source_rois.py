@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 
-from opm_source_toolbox.alignment_qc import render_alignment_qc_bundle
+from opm_source_toolbox.core import resolve_trans_path
 from opm_source_toolbox.sensor_to_roi import (
+    SensorMatrixSpec,
     SourceProjectionConfig,
+    SubjectProjectionSpec,
     export_subject_sensor_matrices,
     load_subject_specs_from_manifest,
 )
@@ -21,6 +24,8 @@ def _alignment_qc_subject_dir(subject_out: str, alignment_qc_out_dir: str | None
 
 
 def _write_alignment_qc_records(subject_spec, image_size: int, out_dir: str) -> list[dict]:
+    from opm_source_toolbox.alignment_qc import render_alignment_qc_bundle
+
     records: list[dict] = []
     os.makedirs(out_dir, exist_ok=True)
     seen: set[tuple[str, str]] = set()
@@ -71,13 +76,176 @@ def _append_alignment_qc_metadata(subject_out: str, alignment_qc_dir: str | None
         json.dump(payload, f, indent=2)
 
 
+def _is_trans_fif_path(path: str) -> bool:
+    base = os.path.basename(path).lower()
+    return base.endswith("_trans.fif") or base.endswith("-trans.fif")
+
+
+def _collect_input_fif_paths(fif_dir: str, fif_glob: str) -> list[str]:
+    pattern = os.path.join(os.path.abspath(fif_dir), fif_glob)
+    paths = sorted(
+        path
+        for path in glob.glob(pattern, recursive=True)
+        if os.path.isfile(path) and not _is_trans_fif_path(path)
+    )
+    if not paths:
+        raise FileNotFoundError(
+            f"No FIF inputs matched {pattern}; adjust --fif-dir or --fif-glob"
+        )
+    return [os.path.abspath(path) for path in paths]
+
+
+def _default_item_name(fif_path: str) -> str:
+    base = os.path.basename(fif_path)
+    if base.lower().endswith(".fif"):
+        base = base[:-4]
+    return base or "item"
+
+
+def _resolve_input_trans_path(
+    *,
+    fif_path: str,
+    subject_dir: str,
+    trans_path: str | None,
+) -> str:
+    if trans_path is not None:
+        if not os.path.exists(trans_path):
+            raise FileNotFoundError(f"Missing trans file: {trans_path}")
+        return os.path.abspath(trans_path)
+
+    search_dirs = [os.path.abspath(os.path.dirname(fif_path))]
+    subject_dir_abs = os.path.abspath(subject_dir)
+    if subject_dir_abs not in search_dirs:
+        search_dirs.append(subject_dir_abs)
+
+    last_missing: FileNotFoundError | None = None
+    for search_dir in search_dirs:
+        try:
+            return os.path.abspath(resolve_trans_path(search_dir, fif_path))
+        except FileNotFoundError as exc:
+            last_missing = exc
+            continue
+
+    if last_missing is not None:
+        raise last_missing
+    raise FileNotFoundError(f"Could not resolve trans file for FIF input {fif_path}")
+
+
+def _build_subject_spec_from_fif_dir(
+    *,
+    subject_dir: str,
+    fif_dir: str,
+    subject: str | None = None,
+    fs_subject: str = "FS",
+    fif_glob: str = "*.fif",
+    trans_path: str | None = None,
+) -> SubjectProjectionSpec:
+    subject_dir_abs = os.path.abspath(subject_dir)
+    fif_dir_abs = os.path.abspath(fif_dir)
+    if not os.path.isdir(subject_dir_abs):
+        raise FileNotFoundError(f"Missing subject_dir: {subject_dir_abs}")
+    if not os.path.isdir(os.path.join(subject_dir_abs, fs_subject)):
+        raise FileNotFoundError(
+            f"Missing FreeSurfer anatomy under {subject_dir_abs}: {fs_subject}"
+        )
+    if not os.path.isdir(fif_dir_abs):
+        raise FileNotFoundError(f"Missing fif_dir: {fif_dir_abs}")
+
+    subject_name = subject or os.path.basename(subject_dir_abs.rstrip(os.sep)) or "subject"
+    fif_paths = _collect_input_fif_paths(fif_dir_abs, fif_glob)
+    items = [
+        SensorMatrixSpec(
+            name=_default_item_name(fif_path),
+            fif_path=fif_path,
+            trans_path=_resolve_input_trans_path(
+                fif_path=fif_path,
+                subject_dir=subject_dir_abs,
+                trans_path=trans_path,
+            ),
+        )
+        for fif_path in fif_paths
+    ]
+    return SubjectProjectionSpec(
+        subject=subject_name,
+        subject_dir=subject_dir_abs,
+        fs_subject=fs_subject,
+        items=items,
+    )
+
+
+def _load_subject_specs_from_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> list[SubjectProjectionSpec]:
+    if args.manifest:
+        if args.subject_dir or args.fif_dir or args.trans_path or args.subject:
+            parser.error(
+                "--manifest cannot be combined with --subject, --subject-dir, "
+                "--fif-dir, or --trans-path"
+            )
+        return load_subject_specs_from_manifest(args.manifest)
+
+    if not args.subject_dir or not args.fif_dir:
+        parser.error(
+            "pass --manifest, or use convenience FIF mode with both "
+            "--subject-dir and --fif-dir"
+        )
+    return [
+        _build_subject_spec_from_fif_dir(
+            subject_dir=args.subject_dir,
+            fif_dir=args.fif_dir,
+            subject=args.subject,
+            fs_subject=args.fs_subject,
+            fif_glob=args.fif_glob,
+            trans_path=args.trans_path,
+        )
+    ]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manifest", required=True, help="JSON manifest describing subject directories and CSV/FIF sensor items")
+    ap.add_argument(
+        "--manifest",
+        default=None,
+        help="JSON manifest describing subject directories and CSV/FIF sensor items",
+    )
+    ap.add_argument(
+        "--subject",
+        default=None,
+        help="Subject identifier for convenience FIF mode; defaults to basename(subject_dir)",
+    )
+    ap.add_argument(
+        "--subject-dir",
+        default=None,
+        help="Subject directory containing the FreeSurfer folder for convenience FIF mode",
+    )
+    ap.add_argument(
+        "--fs-subject",
+        default="FS",
+        help="FreeSurfer folder name under subject_dir for convenience FIF mode; defaults to FS",
+    )
+    ap.add_argument(
+        "--fif-dir",
+        default=None,
+        help="Directory containing FIF inputs for convenience FIF mode",
+    )
+    ap.add_argument(
+        "--fif-glob",
+        default="*.fif",
+        help="Glob for FIF inputs under --fif-dir in convenience FIF mode; defaults to *.fif",
+    )
+    ap.add_argument(
+        "--trans-path",
+        default=None,
+        help="Optional explicit trans file to use for all FIF inputs in convenience FIF mode",
+    )
     ap.add_argument(
         "--out-dir",
         default=os.path.join(os.getcwd(), "source_roi_exports"),
-        help="Output root for exported ROI time-series CSVs; defaults to ./source_roi_exports",
+        help="Output root for exported ROI time-series files; defaults to ./source_roi_exports",
+    )
+    ap.add_argument(
+        "--output-format",
+        choices=("csv", "npz"),
+        default="csv",
+        help="Format for exported ROI time-series files; defaults to csv",
     )
     ap.add_argument("--write-alignment-qc", action="store_true", help="Write optional multi-view sensor/head alignment QC PNGs during export")
     ap.add_argument("--alignment-qc-out-dir", default=None, help="Optional output root for alignment QC PNGs; defaults to <subject-export>/alignment_qc")
@@ -132,10 +300,15 @@ def main() -> int:
         sphere_head_radius=float(args.sphere_head_radius),
     )
 
-    subject_specs = load_subject_specs_from_manifest(args.manifest)
+    subject_specs = _load_subject_specs_from_args(args, ap)
     os.makedirs(args.out_dir, exist_ok=True)
     for subject_spec in subject_specs:
-        subject_out = export_subject_sensor_matrices(subject_spec=subject_spec, out_root=args.out_dir, config=config)
+        subject_out = export_subject_sensor_matrices(
+            subject_spec=subject_spec,
+            out_root=args.out_dir,
+            config=config,
+            output_format=args.output_format,
+        )
         if not args.write_alignment_qc:
             continue
         alignment_qc_dir = _alignment_qc_subject_dir(subject_out=subject_out, alignment_qc_out_dir=args.alignment_qc_out_dir, subject=subject_spec.subject)

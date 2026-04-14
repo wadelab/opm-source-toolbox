@@ -1,35 +1,34 @@
-# Repo Cut Checklist
+# Release Checklist
 
-This checklist assumes `staging/opm-source-roi/` is the source of truth for the
-first standalone extraction.
+This checklist assumes this repository is the source of truth for the standalone
+`opm-source-roi` package.
 
 ## Goal
 
-Create a separate repository that can be installed with `uv` and imported from
+Keep this repository releasable as an installable package that can be imported from
 critical downstream code as:
 
 ```python
 import opm_source_toolbox
 ```
 
-while keeping experiment-specific vibroMEG logic in the current repository.
+while keeping experiment-specific analysis logic in downstream repositories.
 
-## Repository Cut
+## Package Boundary
 
-1. Create a new repository, for example `opm-source-roi`.
-2. Copy the contents of this staging directory into that repository root.
-3. Preserve the current `src/` layout and the `opm_source_toolbox` import package
-   for the first extraction pass.
-4. Preserve the existing console scripts:
+1. Preserve the current `src/` layout and the `opm_source_toolbox` import package.
+2. Preserve the existing console scripts:
    - `opm-source-fetch-atlas`
    - `opm-source-manifest-export`
    - `opm-source-alignment-qc`
    - `opm-source-surface-vector`
-5. Keep the packaged Schaefer `.annot` assets in the wheel.
+3. Keep the packaged Schaefer `.annot` assets in the wheel.
+4. Keep generated HTML documentation artifacts out of source control.
 
-## What Stays In vibroMEG
+## What Stays Downstream
 
-These remain experiment-specific and should stay in the vibroMEG repository:
+These remain experiment-specific and should stay in consumer repositories such as
+`vibroMEG`:
 
 - trigger decoding and run/condition assumptions
 - 23 Hz / 26 Hz steady-state analysis
@@ -75,9 +74,9 @@ Recommended public entrypoints:
 - `render_alignment_qc_bundle`
 - `render_roi_value_map_to_surface`
 
-## vibroMEG Migration
+## Downstream Migration
 
-After the new repository exists:
+For an existing downstream consumer such as `vibroMEG`:
 
 1. Add the new package as a dependency to vibroMEG.
 2. Replace in-repo imports with package imports from `opm_source_toolbox`.
@@ -88,21 +87,23 @@ After the new repository exists:
 
 ## Versioning
 
-Recommended first pass:
+Recommended package identity:
 
 - distribution name: `opm-source-roi`
 - import package: `opm_source_toolbox`
 
-That keeps the current Python import path stable while allowing the repository and
-distribution name to describe the narrower deliverable.
+That keeps the current Python import path stable while allowing the distribution name
+to describe the narrower deliverable.
 
 ## Release Gate
 
-Before calling the first standalone extraction complete:
+Before tagging or publishing a release:
 
-1. `pytest` passes in the standalone repo.
+1. `uv sync --extra dev` followed by `uv run python -m pytest` passes in the standalone repo.
 2. The wheel includes the `.annot` files.
 3. The four documented CLI entrypoints resolve and run.
-4. vibroMEG can install and import the package cleanly.
-5. At least one real downstream workflow runs against the installed package rather
+4. `LICENSE` is present and matches the packaged metadata.
+5. Generated HTML documentation artifacts are not committed.
+6. vibroMEG can install and import the package cleanly.
+7. At least one real downstream workflow runs against the installed package rather
    than the in-repo copy.

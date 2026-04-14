@@ -1,4 +1,4 @@
-"""Atlas import helpers for staging annotation-based atlases into a subjects directory."""
+"""Atlas import helpers for importing annotation-based atlases into a subjects directory."""
 
 from __future__ import annotations
 

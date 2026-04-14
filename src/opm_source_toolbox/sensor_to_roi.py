@@ -36,10 +36,12 @@ from .core import (
     load_run_info,
     setup_subject_source_space,
     write_matrix_csv,
+    write_matrix_npz,
 )
 
 
 _SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_SUPPORTED_OUTPUT_FORMATS = {"csv", "npz"}
 
 
 @dataclass
@@ -49,6 +51,8 @@ class SensorMatrixSpec:
     name: str
     trans_path: str
     matrix_path: Optional[str] = None
+    sfreq_hz: Optional[float] = None
+    time_start_s: Optional[float] = None
     fif_path: Optional[str] = None
     fif_kind: Optional[str] = None
     source_file: Optional[str] = None
@@ -172,6 +176,36 @@ def _item_name_from_path(path: str) -> str:
 
     base = os.path.basename(str(path))
     return os.path.splitext(base)[0] or "item"
+
+
+def _normalize_output_format(output_format: str) -> str:
+    normalized = str(output_format).strip().lower()
+    if normalized not in _SUPPORTED_OUTPUT_FORMATS:
+        allowed = ", ".join(sorted(_SUPPORTED_OUTPUT_FORMATS))
+        raise ValueError(
+            f"Unsupported output format '{output_format}'; expected one of: {allowed}"
+        )
+    return normalized
+
+
+def _coerce_positive_float(value: Any, *, field_name: str, context: str) -> float:
+    try:
+        coerced = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{context} has invalid '{field_name}': {value!r}") from exc
+    if not np.isfinite(coerced) or coerced <= 0.0:
+        raise ValueError(f"{context} has invalid '{field_name}': {value!r}")
+    return coerced
+
+
+def _coerce_finite_float(value: Any, *, field_name: str, context: str) -> float:
+    try:
+        coerced = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{context} has invalid '{field_name}': {value!r}") from exc
+    if not np.isfinite(coerced):
+        raise ValueError(f"{context} has invalid '{field_name}': {value!r}")
+    return coerced
 
 
 def _coerce_bool(value: Any, *, default: bool = False) -> bool:
@@ -492,6 +526,17 @@ def load_subject_specs_from_manifest(manifest_path: str) -> list[SubjectProjecti
             "tmax",
             default=_first_present(global_defaults, "tmax_s", "tmax"),
         )
+        default_sfreq_hz = _first_present(
+            subject_payload,
+            "sfreq_hz",
+            "sfreq",
+            default=_first_present(global_defaults, "sfreq_hz", "sfreq"),
+        )
+        default_time_start_s = _first_present(
+            subject_payload,
+            "time_start_s",
+            default=_first_present(global_defaults, "time_start_s"),
+        )
 
         # Different callers may think of these as items, matrices, or runs; here they
         # all normalize to "sensor matrices to project into source space".
@@ -605,6 +650,27 @@ def load_subject_specs_from_manifest(manifest_path: str) -> list[SubjectProjecti
                 "tmax",
                 default=default_tmax_s,
             )
+            sfreq_hz = _first_present(
+                item_payload,
+                "sfreq_hz",
+                "sfreq",
+                default=default_sfreq_hz,
+            )
+            time_start_s = _first_present(
+                item_payload,
+                "time_start_s",
+                default=default_time_start_s,
+            )
+            if matrix_path and sfreq_hz is None:
+                raise ValueError(
+                    f"Item {item_idx} for subject {subject_name} uses 'matrix_path' but "
+                    "is missing 'sfreq_hz'"
+                )
+            if matrix_path and time_start_s is None:
+                raise ValueError(
+                    f"Item {item_idx} for subject {subject_name} uses 'matrix_path' but "
+                    "is missing 'time_start_s'"
+                )
             name = str(
                 _first_present(
                     item_payload,
@@ -627,6 +693,24 @@ def load_subject_specs_from_manifest(manifest_path: str) -> list[SubjectProjecti
                     name=name,
                     trans_path=str(trans_path),
                     matrix_path=None if matrix_path is None else str(matrix_path),
+                    sfreq_hz=(
+                        None
+                        if sfreq_hz is None
+                        else _coerce_positive_float(
+                            sfreq_hz,
+                            field_name="sfreq_hz",
+                            context=f"Item {name} for subject {subject_name}",
+                        )
+                    ),
+                    time_start_s=(
+                        None
+                        if time_start_s is None
+                        else _coerce_finite_float(
+                            time_start_s,
+                            field_name="time_start_s",
+                            context=f"Item {name} for subject {subject_name}",
+                        )
+                    ),
                     fif_path=None if fif_path is None else str(fif_path),
                     fif_kind=None if fif_kind is None else str(fif_kind),
                     source_file=None if source_file is None else str(source_file),
@@ -675,12 +759,28 @@ def _load_sensor_item(spec: SensorMatrixSpec) -> _LoadedSensorItem:
         # channels-by-time matrix that the source layer should project as-is.
         if not os.path.exists(spec.matrix_path):
             raise FileNotFoundError(f"Missing sensor matrix CSV: {spec.matrix_path}")
+        if spec.sfreq_hz is None:
+            raise ValueError(
+                f"Sensor item {spec.name} uses matrix_path but is missing required sfreq_hz"
+            )
+        if spec.time_start_s is None:
+            raise ValueError(
+                f"Sensor item {spec.name} uses matrix_path but is missing required time_start_s"
+            )
         ch_names, data = load_matrix_csv(spec.matrix_path, name_col=spec.ch_name_col)
         data = np.asarray(data, dtype=float)
         input_kind = "csv"
         input_path = str(spec.matrix_path)
-        sfreq_hz = None
-        time_start_s = None
+        sfreq_hz = _coerce_positive_float(
+            spec.sfreq_hz,
+            field_name="sfreq_hz",
+            context=f"Sensor item {spec.name}",
+        )
+        time_start_s = _coerce_finite_float(
+            spec.time_start_s,
+            field_name="time_start_s",
+            context=f"Sensor item {spec.name}",
+        )
     else:
         if spec.fif_path is None:
             raise ValueError(
@@ -957,10 +1057,12 @@ def export_subject_sensor_matrices(
     subject_spec: SubjectProjectionSpec,
     out_root: str,
     config: SourceProjectionConfig,
+    output_format: str = "csv",
 ) -> str:
-    """Export ROI time-series CSVs and metadata for every item in one subject spec."""
+    """Export ROI time-series matrices and metadata for every item in one subject spec."""
 
     config.validate()
+    output_format = _normalize_output_format(output_format)
 
     # Subject anatomy is expected in a standard FreeSurfer-style layout under subject_dir.
     subject_dir = os.path.abspath(subject_spec.subject_dir)
@@ -996,8 +1098,8 @@ def export_subject_sensor_matrices(
         # shared estimate instead of separate per-item covariances.
         shared_empirical_cov = _build_shared_empirical_covariance(loaded_items)
 
-    # Each subject gets its own export directory containing ROI CSVs plus one metadata
-    # record that describes the full conversion.
+    # Each subject gets its own export directory containing ROI matrices plus one
+    # metadata record that describes the full conversion.
     subject_out = os.path.join(out_root, subject_spec.subject)
     ensure_dir(subject_out)
 
@@ -1006,7 +1108,7 @@ def export_subject_sensor_matrices(
     roi_names = [label.name for label in labels]
 
     for loaded_item in loaded_items:
-        # Process one matrix at a time so each output CSV has a direct provenance link
+        # Process one matrix at a time so each output file has a direct provenance link
         # back to one sensor matrix and its geometry files.
         result = project_sensor_item_to_atlas_rois(
             loaded_item=loaded_item,
@@ -1025,16 +1127,31 @@ def export_subject_sensor_matrices(
         used_stems[stem] = seen_n + 1
         if seen_n:
             stem = f"{stem}_{seen_n + 1:02d}"
-        out_csv = os.path.join(subject_out, f"{stem}.csv")
-        # Write the final ROI-by-time matrix in the same simple CSV style used elsewhere
-        # in this repository's downstream analysis code.
-        write_matrix_csv(out_csv, name_col="roi_name", names=result.roi_names, data=result.data)
+        out_path = os.path.join(subject_out, f"{stem}.{output_format}")
+        if output_format == "csv":
+            # Keep the original CSV layout as the default because downstream analysis
+            # code already consumes it directly.
+            write_matrix_csv(
+                out_path,
+                name_col="roi_name",
+                names=result.roi_names,
+                data=result.data,
+            )
+        else:
+            write_matrix_npz(
+                out_path,
+                name_col="roi_name",
+                names=result.roi_names,
+                data=result.data,
+            )
 
-        # Keep enough metadata to audit how each exported CSV was produced later on.
+        # Keep enough metadata to audit how each exported matrix was produced later on.
         item_records.append(
             {
                 "name": result.item_name,
-                "output_csv": os.path.basename(out_csv),
+                "output_file": os.path.basename(out_path),
+                "output_format": output_format,
+                "output_csv": os.path.basename(out_path) if output_format == "csv" else None,
                 "input_kind": loaded_item.input_kind,
                 "input_path": os.path.abspath(loaded_item.input_path),
                 "matrix_path": (
@@ -1074,6 +1191,7 @@ def export_subject_sensor_matrices(
         "atlas_parc": config.atlas_parc,
         "atlas_subject": config.atlas_subject or subject_spec.fs_subject,
         "source_spacing": config.source_spacing,
+        "output_format": output_format,
         "inverse_kind": config.inverse_kind,
         "mne_method": config.mne_method,
         "mne_pick_ori": config.mne_pick_ori,
@@ -1098,6 +1216,7 @@ def export_manifest_to_rois(
     manifest_path: str,
     out_root: str,
     config: SourceProjectionConfig,
+    output_format: str = "csv",
 ) -> list[str]:
     """Convert a whole manifest into per-subject ROI exports and return their paths."""
 
@@ -1109,5 +1228,12 @@ def export_manifest_to_rois(
     for subject_spec in subject_specs:
         # Return the subject output directories so callers can chain into downstream
         # analyses without rediscovering where files were written.
-        out_paths.append(export_subject_sensor_matrices(subject_spec, out_root=out_root, config=config))
+        out_paths.append(
+            export_subject_sensor_matrices(
+                subject_spec,
+                out_root=out_root,
+                config=config,
+                output_format=output_format,
+            )
+        )
     return out_paths
