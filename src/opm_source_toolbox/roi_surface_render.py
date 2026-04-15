@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import os
 from typing import Mapping, Optional, Sequence
 
@@ -23,6 +24,8 @@ from .core import DEFAULT_ATLAS_PARC, ensure_dir, resolve_atlas_annotation_spec
 _VIEW_LAYOUT = (
     ("left", "lateral", "lh"),
     ("right", "lateral", "rh"),
+    ("left", "medial", "lh"),
+    ("right", "medial", "rh"),
     ("left", "dorsal", "lh"),
     ("right", "dorsal", "rh"),
 )
@@ -224,22 +227,25 @@ def _render_tile_png(
 
 
 def _build_montage(tile_paths: Sequence[str], out_path: str, header_text: str) -> None:
-    """Assemble the four default surface views into one 2x2 montage PNG."""
+    """Assemble rendered surface tiles into a simple montage PNG."""
+
+    if not tile_paths:
+        raise ValueError("No tile paths were provided for montage building")
 
     tiles = [Image.open(path).convert("RGB") for path in tile_paths]
     tile_w = max(tile.width for tile in tiles)
     tile_h = max(tile.height for tile in tiles)
     header_h = 70
-    canvas = Image.new("RGB", (tile_w * 2, header_h + (tile_h * 2)), "white")
+    n_tiles = len(tiles)
+    n_cols = 2
+    n_rows = int(math.ceil(n_tiles / n_cols))
+    canvas = Image.new("RGB", (tile_w * n_cols, header_h + (tile_h * n_rows)), "white")
     draw = ImageDraw.Draw(canvas)
     draw.text((20, 18), header_text, fill="black")
-    positions = (
-        (0, header_h),
-        (tile_w, header_h),
-        (0, header_h + tile_h),
-        (tile_w, header_h + tile_h),
-    )
-    for tile, pos in zip(tiles, positions):
+    for idx, tile in enumerate(tiles):
+        row = idx // n_cols
+        col = idx % n_cols
+        pos = (col * tile_w, header_h + (row * tile_h))
         canvas.paste(tile.resize((tile_w, tile_h)), pos)
         tile.close()
     canvas.save(out_path)

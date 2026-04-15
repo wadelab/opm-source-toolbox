@@ -22,6 +22,10 @@ dependencies = [
     "scipy>=1.8",
     "mne>=1.0",
     "nibabel>=5.3",
+    "scikit-learn>=1.6.1",
+    "pyvista>=0.46.5",
+    "pyvistaqt>=0.11.3",
+    "pyqt5>=5.15.11",
 ]
 
 [project.urls]

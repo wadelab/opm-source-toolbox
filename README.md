@@ -150,4 +150,5 @@ The public Python API is documented in `docs/public_api.md`.
 4. Optionally render ROI values with `opm-source-surface-vector`.
 
 Additional command and API details live in the `docs/` directory.
+The end-to-end sample notebook lives in `docs/opm_to_surface_timeseries_tutorial.ipynb`.
 The release checklist for this package lives in `docs/release_checklist.md`.

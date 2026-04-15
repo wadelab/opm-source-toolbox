@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sys
 from types import SimpleNamespace
+import zipfile
 
 import mne
 from nibabel.freesurfer.io import read_annot
@@ -23,12 +24,36 @@ from opm_source_toolbox.sensor_to_roi import (
     export_manifest_to_rois,
     load_subject_specs_from_manifest,
 )
+from opm_source_toolbox.workflow import (
+    build_bem,
+    DEFAULT_SAMPLE_FILES,
+    DEFAULT_SAMPLE_FS_URL,
+    DEFAULT_YORK_FS_SAMPLE_URL,
+    DEFAULT_YORK_SAMPLE_FILES,
+    EventDetectionResult,
+    detect_primary_events,
+    download_file,
+    extract_zip_once,
+    find_freesurfer_subject_dir,
+    prepare_sample_dataset,
+    prepare_york_sample_dataset,
+    SampleDataset,
+    YorkSampleDataset,
+)
 
 
 def test_top_level_public_api_exports_expected_symbols() -> None:
     core_expected = {
         "AtlasFetchResult",
         "DEFAULT_ATLAS_PARC",
+        "build_bem",
+        "DEFAULT_SAMPLE_FILES",
+        "DEFAULT_SAMPLE_FS_URL",
+        "DEFAULT_YORK_FS_SAMPLE_URL",
+        "DEFAULT_YORK_SAMPLE_FILES",
+        "detect_primary_events",
+        "download_file",
+        "EventDetectionResult",
         "RoiProjectionResult",
         "SensorMatrixSpec",
         "SourceProjectionConfig",
@@ -36,11 +61,17 @@ def test_top_level_public_api_exports_expected_symbols() -> None:
         "default_atlas_subjects_dir",
         "export_manifest_to_rois",
         "export_subject_sensor_matrices",
+        "extract_zip_once",
         "fetch_atlas",
         "fetch_atlas_to_path",
         "fetch_schaefer_annotations",
+        "find_freesurfer_subject_dir",
         "import_annotation_pair",
         "load_subject_specs_from_manifest",
+        "prepare_sample_dataset",
+        "prepare_york_sample_dataset",
+        "SampleDataset",
+        "YorkSampleDataset",
     }
     alignment_expected = {
         "AlignmentQcResult",
@@ -62,6 +93,9 @@ def test_top_level_public_api_exports_expected_symbols() -> None:
     assert resolved["SourceProjectionConfig"] is SourceProjectionConfig
     assert resolved["SensorMatrixSpec"] is SensorMatrixSpec
     assert resolved["RoiProjectionResult"] is RoiProjectionResult
+    assert resolved["EventDetectionResult"] is EventDetectionResult
+    assert resolved["SampleDataset"] is SampleDataset
+    assert resolved["YorkSampleDataset"] is YorkSampleDataset
 
     try:
         import nilearn  # noqa: F401
@@ -235,6 +269,181 @@ def test_load_sensor_item_supports_matrix_csv_with_explicit_sfreq(tmp_path: Path
     assert loaded.sfreq_hz == pytest.approx(200.0)
     assert loaded.time_start_s == pytest.approx(-0.05)
     assert np.allclose(loaded.data, expected)
+
+
+def test_download_file_supports_file_urls(tmp_path: Path) -> None:
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"sample-bytes")
+
+    destination = tmp_path / "downloads" / "copy.bin"
+    out_path = download_file(source.as_uri(), destination)
+
+    assert out_path == destination
+    assert destination.read_bytes() == b"sample-bytes"
+
+
+def test_extract_zip_once_uses_marker_file(tmp_path: Path) -> None:
+    archive_path = tmp_path / "sample.zip"
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("nested/example.txt", "hello")
+
+    extracted = extract_zip_once(archive_path, tmp_path / "unzipped")
+    assert (extracted / "nested" / "example.txt").read_text(encoding="utf-8") == "hello"
+
+    (extracted / "nested" / "example.txt").write_text("changed", encoding="utf-8")
+    extracted_again = extract_zip_once(archive_path, extracted)
+
+    assert extracted_again == extracted
+    assert (extracted / "nested" / "example.txt").read_text(encoding="utf-8") == "changed"
+
+
+def test_find_freesurfer_subject_dir_finds_subject_root(tmp_path: Path) -> None:
+    subject_dir = tmp_path / "subjects_download" / "FS"
+    (subject_dir / "mri").mkdir(parents=True)
+    (subject_dir / "surf").mkdir(parents=True)
+    (subject_dir / "mri" / "orig.mgz").write_text("x", encoding="utf-8")
+    (subject_dir / "surf" / "lh.white").write_text("x", encoding="utf-8")
+
+    assert find_freesurfer_subject_dir(tmp_path / "subjects_download") == subject_dir
+
+
+def test_detect_primary_events_prefers_annotations() -> None:
+    raw = mne.io.RawArray(np.zeros((1, 20)), mne.create_info(["MEG001"], 100.0, ["mag"]))
+    raw.set_annotations(
+        mne.Annotations(
+            onset=[0.01, 0.05, 0.09],
+            duration=[0.0, 0.0, 0.0],
+            description=["visual", "visual", "bad_motion"],
+        )
+    )
+
+    result = detect_primary_events(raw)
+
+    assert isinstance(result, EventDetectionResult)
+    assert result.source == "annotations"
+    assert result.event_id == {"visual": 1}
+    assert result.events.shape[0] == 2
+
+
+def test_detect_primary_events_falls_back_to_stim_channel() -> None:
+    data = np.zeros((2, 40))
+    data[1, [5, 10, 30]] = [1, 1, 2]
+    raw = mne.io.RawArray(
+        data,
+        mne.create_info(["MEG001", "STI 014"], 100.0, ["mag", "stim"]),
+        verbose=False,
+    )
+
+    result = detect_primary_events(raw)
+
+    assert result.source == "STI 014"
+    assert result.event_id == {"visual": 1}
+    assert result.events.shape[0] == 3
+
+
+def test_prepare_york_sample_dataset_downloads_and_resolves_paths(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+
+    inhelmet = source_dir / "Rxxxx_InHelmet.ply"
+    outside = source_dir / "Rxxxx_01_Outside.ply"
+    mri_scalp = source_dir / "mriscalp.stl"
+    raw_fif_src = source_dir / "VEP_DS-raw.fif"
+    inhelmet.write_text("inside", encoding="utf-8")
+    outside.write_text("outside", encoding="utf-8")
+    mri_scalp.write_text("scalp", encoding="utf-8")
+    raw_fif_src.write_text("raw", encoding="utf-8")
+
+    fs_zip = source_dir / "FS_Sample.zip"
+    with zipfile.ZipFile(fs_zip, "w") as archive:
+        archive.writestr("FS/mri/orig.mgz", "orig")
+        archive.writestr("FS/surf/lh.white", "white")
+
+    sample_files = {
+        "Rxxxx_InHelmet.ply": inhelmet.as_uri(),
+        "Rxxxx_01_Outside.ply": outside.as_uri(),
+        "FS/surf/mriscalp.stl": mri_scalp.as_uri(),
+        "VEP_DS-raw.fif": raw_fif_src.as_uri(),
+    }
+
+    result = prepare_york_sample_dataset(
+        work_dir=tmp_path / "work",
+        sample_files=sample_files,
+        fs_sample_url=fs_zip.as_uri(),
+    )
+
+    assert isinstance(result, YorkSampleDataset)
+    assert result.subject_name == "FS"
+    assert result.subject_dir == result.subjects_download_dir / "FS"
+    assert result.raw_fif.exists()
+    assert result.aligned_fif.exists()
+    assert result.inside_mesh.exists()
+    assert result.outside_mesh.exists()
+    assert result.mri_scalp.exists()
+
+
+def test_prepare_sample_dataset_is_alias_of_packaged_helper(tmp_path: Path) -> None:
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+
+    inhelmet = source_dir / "Rxxxx_InHelmet.ply"
+    outside = source_dir / "Rxxxx_01_Outside.ply"
+    mri_scalp = source_dir / "mriscalp.stl"
+    raw_fif_src = source_dir / "VEP_DS-raw.fif"
+    inhelmet.write_text("inside", encoding="utf-8")
+    outside.write_text("outside", encoding="utf-8")
+    mri_scalp.write_text("scalp", encoding="utf-8")
+    raw_fif_src.write_text("raw", encoding="utf-8")
+
+    fs_zip = source_dir / "FS_Sample.zip"
+    with zipfile.ZipFile(fs_zip, "w") as archive:
+        archive.writestr("FS/mri/orig.mgz", "orig")
+        archive.writestr("FS/surf/lh.white", "white")
+
+    result = prepare_sample_dataset(
+        work_dir=tmp_path / "work",
+        sample_files={
+            "Rxxxx_InHelmet.ply": inhelmet.as_uri(),
+            "Rxxxx_01_Outside.ply": outside.as_uri(),
+            "FS/surf/mriscalp.stl": mri_scalp.as_uri(),
+            "VEP_DS-raw.fif": raw_fif_src.as_uri(),
+        },
+        fs_sample_url=fs_zip.as_uri(),
+    )
+
+    assert isinstance(result, SampleDataset)
+    assert result.subject_name == "FS"
+
+
+def test_build_bem_writes_solution_with_inferred_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    subject_dir = tmp_path / "subjects" / "FS"
+    subject_dir.mkdir(parents=True)
+    calls: dict[str, object] = {}
+
+    def fake_make_bem_model(*, subject, conductivity, subjects_dir, verbose):
+        calls["subject"] = subject
+        calls["conductivity"] = conductivity
+        calls["subjects_dir"] = subjects_dir
+        return {"subject": subject}
+
+    def fake_make_bem_solution(model, *, verbose):
+        calls["model"] = model
+        return {"solution": model}
+
+    def fake_write_bem_solution(path, solution, *, overwrite, verbose):
+        calls["path"] = path
+        Path(path).write_text("bem", encoding="utf-8")
+
+    monkeypatch.setattr(mne, "make_bem_model", fake_make_bem_model)
+    monkeypatch.setattr(mne, "make_bem_solution", fake_make_bem_solution)
+    monkeypatch.setattr(mne, "write_bem_solution", fake_write_bem_solution)
+
+    bem_path = build_bem(subject_dir)
+
+    assert bem_path == subject_dir / "bem" / "FS-bem-sol.fif"
+    assert Path(calls["path"]).exists()
+    assert calls["subject"] == "FS"
+    assert calls["subjects_dir"] == str(subject_dir.parent)
 
 
 def test_manifest_requires_sfreq_hz_for_matrix_inputs(tmp_path: Path) -> None:
